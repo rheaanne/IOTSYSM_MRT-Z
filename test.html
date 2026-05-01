@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test - Adafruit IO MQTT Subscriber</title>
+</head>
+<body>
+    <h1>Quick Test Page</h1>
+    <p>If you can see this, the HTML loads correctly.</p>
+    <p>Open the browser console (F12) to check for MQTT.js loading errors.</p>
+    
+    <!-- Test MQTT.js loading -->
+    <script>
+        if (typeof mqtt !== 'undefined') {
+            document.write('<p style="color: green;">✅ MQTT.js loaded successfully</p>');
+            console.log('MQTT version:', mqtt.version || 'unknown');
+        } else {
+            document.write('<p style="color: red;">❌ MQTT.js failed to load</p>');
+        }
+    </script>
+</body>
+</html>
