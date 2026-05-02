@@ -2,17 +2,16 @@ import paho.mqtt.client as mqtt
 import sqlite3
 from datetime import datetime
 
-# ==========================================
-# CREDENTIALS — update your AIO key here
-# ==========================================
 AIO_USERNAME = "Eyya"
-AIO_KEY      = "your_new_aio_key_here"
-TEMP_FEED    = f"{AIO_USERNAME}/feeds/san-lorenzo-temp"
-HUM_FEED     = f"{AIO_USERNAME}/feeds/san-lorenzo-hum"
+AIO_KEY      = "your_actual_aio_key_here"   # ← replace this
 
-# ==========================================
-# DATABASE SETUP
-# ==========================================
+FEEDS = [
+    "villamor-temp", "villamor-hum",
+    "afpovai-temp",  "afpovai-hum",
+    "san-lorenzo-temp", "san-lorenzo-hum",
+    "better-living-temp", "better-living-hum",
+]
+
 def init_db():
     conn = sqlite3.connect("sensor_data.db")
     cursor = conn.cursor()
@@ -39,15 +38,13 @@ def save_reading(feed, value):
     conn.close()
     print(f"[DB] Saved → {feed}: {value}")
 
-# ==========================================
-# MQTT CALLBACKS
-# ==========================================
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         print("[MQTT] Connected to Adafruit IO!")
-        client.subscribe(TEMP_FEED)
-        client.subscribe(HUM_FEED)
-        print(f"[MQTT] Subscribed to temp and humidity feeds")
+        for feed in FEEDS:                              # ← subscribe to all feeds
+            topic = f"{AIO_USERNAME}/feeds/{feed}"
+            client.subscribe(topic)
+            print(f"[MQTT] Subscribed to {topic}")
     else:
         reasons = {
             1: "Wrong protocol version",
@@ -62,7 +59,6 @@ def on_message(client, userdata, msg):
     topic   = msg.topic
     payload = msg.payload.decode("utf-8").strip()
     print(f"[MQTT] Received → [{topic}] = {payload}")
-
     try:
         value = float(payload)
         save_reading(topic, value)
@@ -72,13 +68,14 @@ def on_message(client, userdata, msg):
 def on_disconnect(client, userdata, rc):
     print(f"[MQTT] Disconnected (rc={rc})")
 
-# ==========================================
-# MAIN
-# ==========================================
 def main():
     init_db()
 
-    client = mqtt.Client(client_id=f"python_sub_{datetime.now().timestamp()}")
+    # ↓ fix: CallbackAPIVersion.VERSION1 for paho-mqtt v2
+    client = mqtt.Client(
+        mqtt.CallbackAPIVersion.VERSION1,
+        client_id=f"python_sub_{datetime.now().timestamp()}"
+    )
     client.username_pw_set(AIO_USERNAME, AIO_KEY)
     client.tls_set()
 

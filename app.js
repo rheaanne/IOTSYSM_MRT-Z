@@ -51,8 +51,10 @@ class AgricultureDashboard {
         this.initElements();
         this.bindEvents();
         this.loadSavedCredentials();
+        this.loadSavedNodeData();
         this.initTheme();
         this.renderTable();
+        this.autoConnectIfPossible();
     }
 
     // ── DOM REFS ──────────────────────────────────────────────────────────────
@@ -113,9 +115,49 @@ class AgricultureDashboard {
         if (savedKey)  this.aioKeyInput.value   = savedKey;
     }
 
+    loadSavedNodeData() {
+        const savedData = localStorage.getItem('node_data');
+        if (savedData) {
+            try {
+                const data = JSON.parse(savedData);
+                this.nodes.forEach(node => {
+                    const savedNode = data.find(n => n.id === node.id);
+                    if (savedNode) {
+                        node.temp = savedNode.temp;
+                        node.hum = savedNode.hum;
+                        node.timestamp = savedNode.timestamp ? new Date(savedNode.timestamp) : null;
+                        this.updateNodeStatus(node);
+                    }
+                });
+            } catch (e) {
+                console.error('Failed to load saved node data:', e);
+            }
+        }
+    }
+
+    saveNodeData() {
+        const data = this.nodes.map(node => ({
+            id: node.id,
+            temp: node.temp,
+            hum: node.hum,
+            timestamp: node.timestamp ? node.timestamp.toISOString() : null
+        }));
+        localStorage.setItem('node_data', JSON.stringify(data));
+    }
+
     saveCredentials() {
         localStorage.setItem('adafruit_username', this.username);
         localStorage.setItem('adafruit_aiokey',   this.aioKey);
+    }
+
+    autoConnectIfPossible() {
+        const savedUser = localStorage.getItem('adafruit_username');
+        const savedKey  = localStorage.getItem('adafruit_aiokey');
+        if (savedUser && savedKey) {
+            this.username = savedUser;
+            this.aioKey   = savedKey;
+            this.connect();
+        }
     }
 
     // ── THEME ─────────────────────────────────────────────────────────────────
@@ -274,10 +316,8 @@ class AgricultureDashboard {
             // First login — switch to dashboard
             this.showDashboard();
         } else {
-            // Reconnect — stay on dashboard, reset node data
-            this.resetNodeData();
-            this.renderTable();
-            this.addSystemLog('Reconnected successfully. Waiting for data…');
+            // Reconnect — stay on dashboard, keep existing data
+            this.addSystemLog('Reconnected successfully. Data preserved.');
         }
 
         this.subscribeToAllFeeds();
@@ -311,9 +351,11 @@ class AgricultureDashboard {
 
             this.client.subscribe(tempTopic, (err) => {
                 if (err) console.error(`Subscribe error: ${tempTopic}`, err);
+                else console.log(`Subscribed to: ${tempTopic}`);
             });
             this.client.subscribe(humTopic, (err) => {
                 if (err) console.error(`Subscribe error: ${humTopic}`, err);
+                else console.log(`Subscribed to: ${humTopic}`);
             });
         });
     }
@@ -331,8 +373,12 @@ class AgricultureDashboard {
     // ── MESSAGE HANDLER ───────────────────────────────────────────────────────
     handleMessage(topic, message) {
         const raw   = message.toString().trim();
+        console.log(`[MQTT] Received: ${topic} = ${raw}`);
         const value = parseFloat(raw);
-        if (isNaN(value)) return;
+        if (isNaN(value)) {
+            console.warn(`[MQTT] Invalid value: ${raw}`);
+            return;
+        }
 
         this.messageCount++;
 
@@ -354,6 +400,7 @@ class AgricultureDashboard {
         this.renderTable();
         this.addLogEntry(feedName, value, isTemp);
         this.updateStats();
+        this.saveNodeData();
     }
 
     // ── NODE STATUS ───────────────────────────────────────────────────────────
