@@ -13,40 +13,10 @@ class AgricultureDashboard {
         this.uptimeInterval = null;
         this.isReconnecting = false;
 
-        this.nodes = [
-            {
-                id: 'arduino-villamor',
-                location: 'Villamor',
-                tempFeed: 'villamor-temp',
-                humFeed: 'villamor-hum',
-                temp: '--', hum: '--',
-                timestamp: null, status: 'silent'
-            },
-            {
-                id: 'arduino-afpovai',
-                location: 'AFP/OVAI',
-                tempFeed: 'afpovai-temp',
-                humFeed: 'afpovai-hum',
-                temp: '--', hum: '--',
-                timestamp: null, status: 'silent'
-            },
-            {
-                id: 'arduino-san-lorenzo',
-                location: 'San Lorenzo',
-                tempFeed: 'san-lorenzo-temp',
-                humFeed: 'san-lorenzo-hum',
-                temp: '--', hum: '--',
-                timestamp: null, status: 'silent'
-            },
-            {
-                id: 'arduino-better-living',
-                location: 'Better Living',
-                tempFeed: 'better-living-temp',
-                humFeed: 'better-living-hum',
-                temp: '--', hum: '--',
-                timestamp: null, status: 'silent'
-            },
-        ];
+        // Supabase config - replace with your actual values
+        this.SUPABASE_URL = 'your_supabase_url_here';
+        this.SUPABASE_ANON_KEY = 'your_supabase_anon_key_here';
+        this.supabase = supabase.createClient(this.SUPABASE_URL, this.SUPABASE_ANON_KEY);
 
         this.initElements();
         this.bindEvents();
@@ -94,6 +64,10 @@ class AgricultureDashboard {
         this.logContent      = document.getElementById('mqtt-log-content');
         this.clearLogBtn     = document.getElementById('clear-log');
 
+        // History
+        this.historyContent  = document.getElementById('history-content');
+        this.loadHistoryBtn  = document.getElementById('load-history-btn');
+
         // Stats
         this.activeFeeds     = document.getElementById('active-feeds');
         this.messagesPerHour = document.getElementById('messages-per-hour');
@@ -111,6 +85,7 @@ class AgricultureDashboard {
         this.refreshBtn.addEventListener('click', () => this.reconnect());
         this.themeToggle.addEventListener('click', () => this.toggleTheme());
         this.clearLogBtn.addEventListener('click', () => this.clearLog());
+        this.loadHistoryBtn.addEventListener('click', () => this.loadHistory());
     }
 
     // ── CREDENTIALS ───────────────────────────────────────────────────────────
@@ -645,6 +620,49 @@ class AgricultureDashboard {
     showLogin() {
         this.dashPage.classList.add('hidden');
         this.loginPage.classList.remove('hidden');
+    }
+
+    // ── LOAD HISTORY FROM SUPABASE ─────────────────────────────────────────────
+    async loadHistory() {
+        this.loadHistoryBtn.disabled = true;
+        this.loadHistoryBtn.textContent = 'Loading…';
+
+        try {
+            const { data, error } = await this.supabase
+                .from('sensor_readings')
+                .select('*')
+                .order('timestamp', { ascending: false })
+                .limit(50);
+
+            if (error) throw error;
+
+            this.historyContent.innerHTML = '';
+
+            if (data.length === 0) {
+                this.historyContent.innerHTML = '<div class="log-empty">No historical data found.</div>';
+                return;
+            }
+
+            data.forEach(reading => {
+                const entry = document.createElement('div');
+                entry.className = `history-entry ${reading.sensor_type}`;
+                const timestamp = new Date(reading.timestamp).toLocaleString();
+                entry.innerHTML = `
+                    <span class="history-ts">[${timestamp}]</span>
+                    <span class="history-location">${reading.location}</span>
+                    <span class="history-type">${reading.sensor_type}</span>
+                    <span class="history-value">${reading.value}</span>
+                `;
+                this.historyContent.appendChild(entry);
+            });
+
+        } catch (err) {
+            console.error('Error loading history:', err);
+            this.historyContent.innerHTML = `<div class="log-empty">Error loading data: ${err.message}</div>`;
+        } finally {
+            this.loadHistoryBtn.disabled = false;
+            this.loadHistoryBtn.textContent = 'Load from Supabase';
+        }
     }
 }
 

@@ -1,9 +1,15 @@
 import paho.mqtt.client as mqtt
 import sqlite3
 from datetime import datetime
+from supabase import create_client, Client
 
-AIO_USERNAME = "Eyya"
+AIO_USERNAME = "ndato"
 AIO_KEY      = "your_actual_aio_key_here"   # ← replace this
+
+SUPABASE_URL = "your_supabase_url_here"  # ← replace with your Supabase project URL
+SUPABASE_ANON_KEY = "your_supabase_anon_key_here"  # ← replace with your Supabase anon key
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 FEEDS = [
     "villamor-temp", "villamor-hum",
@@ -27,7 +33,8 @@ def init_db():
     conn.close()
     print("[DB] Database ready.")
 
-def save_reading(feed, value):
+def save_reading(feed, value, location, sensor_type):
+    # Save to local SQLite
     conn = sqlite3.connect("sensor_data.db")
     cursor = conn.cursor()
     cursor.execute(
@@ -37,6 +44,18 @@ def save_reading(feed, value):
     conn.commit()
     conn.close()
     print(f"[DB] Saved → {feed}: {value}")
+
+    # Save to Supabase
+    try:
+        data = {
+            "location": location,
+            "sensor_type": sensor_type,
+            "value": value
+        }
+        supabase.table("sensor_readings").insert(data).execute()
+        print(f"[Supabase] Saved → {location} {sensor_type}: {value}")
+    except Exception as e:
+        print(f"[Supabase] Error saving: {e}")
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
@@ -61,7 +80,16 @@ def on_message(client, userdata, msg):
     print(f"[MQTT] Received → [{topic}] = {payload}")
     try:
         value = float(payload)
-        save_reading(topic, value)
+        # Parse topic to extract feed name
+        feed_name = topic.split('/')[-1]  # e.g., "villamor-temp"
+        # Split into location and sensor_type
+        parts = feed_name.split('-')
+        if len(parts) == 2:
+            location = parts[0]
+            sensor_type = parts[1]  # temp or hum
+            save_reading(topic, value, location, sensor_type)
+        else:
+            print(f"[MQTT] Unexpected feed format: {feed_name}")
     except ValueError:
         print(f"[MQTT] Could not parse: {payload}")
 

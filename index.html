@@ -198,6 +198,20 @@
                 </div>
             </section>
 
+            <!-- HISTORY -->
+            <section class="panel history-panel">
+                <div class="panel-header">
+                    <h3 class="panel-title">
+                        <span class="panel-title-icon">🕒</span>
+                        Sensor History
+                    </h3>
+                    <button class="btn-secondary" id="load-history-btn">Load from Supabase</button>
+                </div>
+                <div class="history-scroll" id="history-content">
+                    <div class="log-empty">Click "Load from Supabase" to fetch historical data.</div>
+                </div>
+            </section>
+
             <!-- MQTT LOG -->
             <section class="panel log-panel">
                 <div class="panel-header">
@@ -217,6 +231,7 @@
 </div>
 
 <script src="https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="app.js"></script>
 </body>
 </html>
