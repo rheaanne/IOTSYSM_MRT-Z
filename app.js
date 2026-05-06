@@ -10,6 +10,8 @@ class AgricultureDashboard {
         this.statusCheckInterval = null;
         this.uptimeInterval = null;
         this.supabaseSubscription = null;
+        this.sensorChart = null;
+        this.chartData = { labels: [], tempData: [], humData: [] };
 
         // Load configuration
         if (typeof config === 'undefined') {
@@ -83,6 +85,7 @@ class AgricultureDashboard {
 
         this.historyContent  = document.getElementById('history-content');
         this.loadHistoryBtn  = document.getElementById('load-history-btn');
+        this.chartCanvas     = document.getElementById('sensor-chart');
 
         this.activeFeeds     = document.getElementById('active-feeds');
         this.messagesPerHour = document.getElementById('messages-per-hour');
@@ -186,6 +189,12 @@ class AgricultureDashboard {
                     this.updateStats();
                     console.log('[Supabase] ✓ Connected via wss:// on Port 443');
                     this.addSystemLog('✓ Connected via secure WebSocket (wss://) on Port 443');
+                    // Auto-fetch recent history once we're subscribed so the UI shows existing data
+                    try {
+                        this.loadHistory();
+                    } catch (e) {
+                        console.warn('[Dashboard] Failed to auto-load history on subscribe:', e);
+                    }
                     this.updateConnectionStatus();
                 } else if (status === 'CHANNEL_ERROR') {
                     console.error('[Supabase] Subscription error');
@@ -465,7 +474,7 @@ class AgricultureDashboard {
         try {
             // Use Supabase REST API to fetch historical logs
             const response = await fetch(
-                `${this.SUPABASE_URL}/rest/v1/sensor_logs?order=created_at.desc&limit=100`,
+                `${this.SUPABASE_URL}/rest/v1/sensor_logs?order=created_at.asc&limit=100`,
                 {
                     headers: {
                         'apikey': this.SUPABASE_ANON_KEY,
@@ -481,31 +490,182 @@ class AgricultureDashboard {
 
             if (data.length === 0) {
                 this.historyContent.innerHTML = '<div class="log-empty">No historical data found.</div>';
+                this.updateChart([]);
                 return;
             }
 
+            // Build chart data
+            const chartData = { labels: [], tempData: [], humData: [] };
             data.forEach(log => {
+                const timestamp = new Date(log.created_at);
+                const timeStr = timestamp.toLocaleTimeString();
+                chartData.labels.push(timeStr);
+
+                const { type } = this.parseFeedName(log.feed_name);
+                if (type === 'temperature') {
+                    chartData.tempData.push(log.value);
+                } else if (type === 'humidity') {
+                    chartData.humData.push(log.value);
+                }
+
+                // Also display in history list
                 const entry = document.createElement('div');
                 entry.className = 'history-entry';
-                const timestamp = new Date(log.created_at).toLocaleString();
+                const dateStr = timestamp.toLocaleString();
                 entry.innerHTML = `
-                    <span class="history-ts">[${timestamp}]</span>
+                    <span class="history-ts">[${dateStr}]</span>
                     <span class="history-feed">${log.feed_name}</span>
                     <span class="history-value">${log.value}</span>
                 `;
                 this.historyContent.appendChild(entry);
             });
 
+            // Fill missing data points for alignment
+            const maxLength = Math.max(chartData.tempData.length, chartData.humData.length);
+            while (chartData.tempData.length < maxLength) {
+                chartData.tempData.push(null);
+            }
+            while (chartData.humData.length < maxLength) {
+                chartData.humData.push(null);
+            }
+
+            this.updateChart(chartData);
+
         } catch (err) {
             console.error('Error loading history:', err);
             this.historyContent.innerHTML = `<div class="log-empty">Error: ${err.message}</div>`;
         } finally {
             this.loadHistoryBtn.disabled = false;
-            this.loadHistoryBtn.textContent = 'Load from Supabase';
+            this.loadHistoryBtn.textContent = 'Load Chart';
+        }
+    }
+
+    // ── CHART INITIALIZATION & UPDATE ──────────────────────────────────────────
+    updateChart(chartData) {
+        const ctx = this.chartCanvas.getContext('2d');
+
+        if (this.sensorChart) {
+            this.sensorChart.destroy();
+        }
+
+        if (chartData.labels && chartData.labels.length > 0) {
+            this.sensorChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: chartData.labels,
+                    datasets: [
+                        {
+                            label: 'Temperature (°C)',
+                            data: chartData.tempData,
+                            borderColor: '#ff6b6b',
+                            backgroundColor: 'rgba(255, 107, 107, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.3,
+                            fill: true,
+                            pointRadius: 3,
+                            pointBackgroundColor: '#ff6b6b',
+                            pointBorderColor: '#fff',
+                            pointBorderWidth: 2,
+                            spanGaps: true
+                        },
+                        {
+                            label: 'Humidity (%)',
+                            data: chartData.humData,
+                            borderColor: '#4ecdc4',
+                            backgroundColor: 'rgba(78, 205, 196, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.3,
+                            fill: true,
+                            pointRadius: 3,
+                            pointBackgroundColor: '#4ecdc4',
+                            pointBorderColor: '#fff',
+                            pointBorderWidth: 2,
+                            yAxisID: 'y1',
+                            spanGaps: true
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                color: window.getComputedStyle(document.body).color,
+                                usePointStyle: true,
+                                padding: 15,
+                                font: { size: 12, weight: '500' }
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                            padding: 10,
+                            titleFont: { size: 13, weight: 'bold' },
+                            bodyFont: { size: 12 },
+                            borderColor: '#ddd',
+                            borderWidth: 1
+                        }
+                    },
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: 'Temperature (°C)',
+                                color: '#ff6b6b',
+                                font: { size: 12, weight: 'bold' }
+                            },
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.05)'
+                            },
+                            ticks: {
+                                color: window.getComputedStyle(document.body).color
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: 'Humidity (%)',
+                                color: '#4ecdc4',
+                                font: { size: 12, weight: 'bold' }
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            },
+                            ticks: {
+                                color: window.getComputedStyle(document.body).color
+                            }
+                        },
+                        x: {
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.05)'
+                            },
+                            ticks: {
+                                color: window.getComputedStyle(document.body).color,
+                                maxRotation: 45,
+                                minRotation: 0
+                            }
+                        }
+                    }
+                }
+            });
+            console.log('[Chart] Updated with', chartData.labels.length, 'data points');
         }
     }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    new AgricultureDashboard();
+    // Expose instance to window for debugging/inspection in DevTools
+    window.dashboard = new AgricultureDashboard();
 });

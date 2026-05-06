@@ -205,10 +205,23 @@
                         <span class="panel-title-icon">🕒</span>
                         Sensor History
                     </h3>
-                    <button class="btn-secondary" id="load-history-btn">Load from Supabase</button>
+                    <button class="btn-secondary" id="load-history-btn">Load Chart</button>
+                </div>
+                <div class="history-scroll" id="chart-container-wrap">
+                    <canvas id="sensor-chart"></canvas>
+                </div>
+            </section>
+
+            <!-- DATA TABLE -->
+            <section class="panel history-panel">
+                <div class="panel-header">
+                    <h3 class="panel-title">
+                        <span class="panel-title-icon">📋</span>
+                        Historical Data
+                    </h3>
                 </div>
                 <div class="history-scroll" id="history-content">
-                    <div class="log-empty">Click "Load from Supabase" to fetch historical data.</div>
+                    <div class="log-empty">Chart will show historical records.</div>
                 </div>
             </section>
 
@@ -231,6 +244,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="config.js"></script>
 <script src="app.js"></script>
 </body>
