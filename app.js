@@ -453,8 +453,7 @@ class AgricultureDashboard {
         } else {
             tempDisplay = `--<span>°C</span>`;
         }
-        this.kpiTempVal.innerHTML = tempDisplay +
-            `<div class="kpi-mini">Min: ${tempMin}°C | Max: ${tempMax}°C | Last: ${tempLast}°C</div>`;
+        this.kpiTempVal.innerHTML = tempDisplay;
 
         // --- Humidity KPI ---
         const nodesWithHum = this.nodes.filter(n => n.hum !== '--');
@@ -476,8 +475,7 @@ class AgricultureDashboard {
         } else {
             humDisplay = `--<span>%</span>`;
         }
-        this.kpiHumVal.innerHTML = humDisplay +
-            `<div class="kpi-mini">Min: ${humMin}% | Max: ${humMax}% | Last: ${humLast}%</div>`;
+        this.kpiHumVal.innerHTML = humDisplay;
 
         // --- Meta/Badge ---
         const activeNodes = this.nodes.filter(n => n.status === 'transmitting');
