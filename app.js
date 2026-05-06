@@ -1,5 +1,5 @@
 // Smart Agriculture IoT Dashboard
-// v3 — Removed Day/Night, added Reconnect button (stays on dashboard)
+// v4 — Added Temperature & Humidity KPI cards
 
 class AgricultureDashboard {
     constructor() {
@@ -83,6 +83,12 @@ class AgricultureDashboard {
         // Table
         this.tableBody       = document.getElementById('sensor-table-body');
         this.activeCount     = document.getElementById('active-count');
+
+        // KPI Cards
+        this.kpiTempVal      = document.getElementById('kpi-temp-val');
+        this.kpiTempMeta     = document.getElementById('kpi-temp-meta');
+        this.kpiHumVal       = document.getElementById('kpi-hum-val');
+        this.kpiHumMeta      = document.getElementById('kpi-hum-meta');
 
         // Log
         this.logContent      = document.getElementById('mqtt-log-content');
@@ -212,7 +218,6 @@ class AgricultureDashboard {
     reconnect() {
         if (this.isReconnecting) return;
 
-        // Tear down existing connection cleanly
         if (this.client) {
             try { this.client.end(true); } catch (_) {}
             this.client = null;
@@ -313,10 +318,8 @@ class AgricultureDashboard {
         this.updateConnectionStatus();
 
         if (!isReconnect) {
-            // First login — switch to dashboard
             this.showDashboard();
         } else {
-            // Reconnect — stay on dashboard, keep existing data
             this.addSystemLog('Reconnected successfully. Data preserved.');
         }
 
@@ -428,8 +431,44 @@ class AgricultureDashboard {
         }
     }
 
+    // ── KPI CARDS ─────────────────────────────────────────────────────────────
+    renderKpiCards() {
+        const nodesWithTemp = this.nodes.filter(n => n.temp !== '--');
+        const nodesWithHum  = this.nodes.filter(n => n.hum  !== '--');
+        const activeNodes   = this.nodes.filter(n => n.status === 'transmitting');
+        const total         = this.nodes.length;
+        const active        = activeNodes.length;
+
+        // Temperature KPI
+        if (nodesWithTemp.length > 0) {
+            const avgTemp = nodesWithTemp.reduce((s, n) => s + parseFloat(n.temp), 0) / nodesWithTemp.length;
+            this.kpiTempVal.innerHTML = `${avgTemp.toFixed(1)}<span>°C</span>`;
+        } else {
+            this.kpiTempVal.innerHTML = `--<span>°C</span>`;
+        }
+
+        // Humidity KPI
+        if (nodesWithHum.length > 0) {
+            const avgHum = nodesWithHum.reduce((s, n) => s + parseFloat(n.hum), 0) / nodesWithHum.length;
+            this.kpiHumVal.innerHTML = `${avgHum.toFixed(1)}<span>%</span>`;
+        } else {
+            this.kpiHumVal.innerHTML = `--<span>%</span>`;
+        }
+
+        // Shared badge for both cards
+        const badgeClass = active > 0 ? 'active-badge' : 'silent-badge';
+        const badgeText  = active > 0
+            ? `${active} of ${total} nodes active`
+            : `No active nodes`;
+
+        const badge = `<span class="kpi-badge ${badgeClass}">${badgeText}</span>`;
+        this.kpiTempMeta.innerHTML = badge;
+        this.kpiHumMeta.innerHTML  = badge;
+    }
+
     // ── TABLE ─────────────────────────────────────────────────────────────────
     renderTable() {
+        this.renderKpiCards();
         this.tableBody.innerHTML = '';
 
         this.nodes.forEach(node => {
