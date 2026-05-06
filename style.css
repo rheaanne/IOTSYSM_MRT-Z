@@ -699,6 +699,23 @@ body {
     color: var(--red);
 }
 
+/* CHART CONTAINER */
+#chart-container-wrap {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
+    max-height: 350px;
+}
+
+#sensor-chart {
+    max-height: 100%;
+    width: 100%;
+}
+
 /* HISTORY */
 .history-panel {
     display: flex;
