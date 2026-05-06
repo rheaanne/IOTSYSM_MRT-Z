@@ -433,37 +433,71 @@ class AgricultureDashboard {
 
     // ── KPI CARDS ─────────────────────────────────────────────────────────────
     renderKpiCards() {
+        // --- Temperature KPI ---
         const nodesWithTemp = this.nodes.filter(n => n.temp !== '--');
-        const nodesWithHum  = this.nodes.filter(n => n.hum  !== '--');
-        const activeNodes   = this.nodes.filter(n => n.status === 'transmitting');
-        const total         = this.nodes.length;
-        const active        = activeNodes.length;
-
-        // Temperature KPI
-        if (nodesWithTemp.length > 0) {
-            const avgTemp = nodesWithTemp.reduce((s, n) => s + parseFloat(n.temp), 0) / nodesWithTemp.length;
-            this.kpiTempVal.innerHTML = `${avgTemp.toFixed(1)}<span>°C</span>`;
+        let tempVals = nodesWithTemp.map(n => parseFloat(n.temp));
+        let tempDisplay = '--';
+        let tempMin = '--', tempMax = '--', tempLast = '--', tempTrend = '';
+        if (tempVals.length > 0) {
+            const avgTemp = tempVals.reduce((s, v) => s + v, 0) / tempVals.length;
+            tempMin = Math.min(...tempVals).toFixed(1);
+            tempMax = Math.max(...tempVals).toFixed(1);
+            tempLast = nodesWithTemp[nodesWithTemp.length - 1].temp;
+            // Trend: compare last two averages
+            if (!this.prevAvgTemp) this.prevAvgTemp = avgTemp;
+            if (avgTemp > this.prevAvgTemp) tempTrend = '↑';
+            else if (avgTemp < this.prevAvgTemp) tempTrend = '↓';
+            else tempTrend = '→';
+            this.prevAvgTemp = avgTemp;
+            tempDisplay = `${avgTemp.toFixed(1)}<span>°C</span> <span class="kpi-trend">${tempTrend}</span>`;
         } else {
-            this.kpiTempVal.innerHTML = `--<span>°C</span>`;
+            tempDisplay = `--<span>°C</span>`;
         }
+        this.kpiTempVal.innerHTML = tempDisplay +
+            `<div class="kpi-mini">Min: ${tempMin}°C | Max: ${tempMax}°C | Last: ${tempLast}°C</div>`;
 
-        // Humidity KPI
-        if (nodesWithHum.length > 0) {
-            const avgHum = nodesWithHum.reduce((s, n) => s + parseFloat(n.hum), 0) / nodesWithHum.length;
-            this.kpiHumVal.innerHTML = `${avgHum.toFixed(1)}<span>%</span>`;
+        // --- Humidity KPI ---
+        const nodesWithHum = this.nodes.filter(n => n.hum !== '--');
+        let humVals = nodesWithHum.map(n => parseFloat(n.hum));
+        let humDisplay = '--';
+        let humMin = '--', humMax = '--', humLast = '--', humTrend = '';
+        if (humVals.length > 0) {
+            const avgHum = humVals.reduce((s, v) => s + v, 0) / humVals.length;
+            humMin = Math.min(...humVals).toFixed(1);
+            humMax = Math.max(...humVals).toFixed(1);
+            humLast = nodesWithHum[nodesWithHum.length - 1].hum;
+            // Trend: compare last two averages
+            if (!this.prevAvgHum) this.prevAvgHum = avgHum;
+            if (avgHum > this.prevAvgHum) humTrend = '↑';
+            else if (avgHum < this.prevAvgHum) humTrend = '↓';
+            else humTrend = '→';
+            this.prevAvgHum = avgHum;
+            humDisplay = `${avgHum.toFixed(1)}<span>%</span> <span class="kpi-trend">${humTrend}</span>`;
         } else {
-            this.kpiHumVal.innerHTML = `--<span>%</span>`;
+            humDisplay = `--<span>%</span>`;
         }
+        this.kpiHumVal.innerHTML = humDisplay +
+            `<div class="kpi-mini">Min: ${humMin}% | Max: ${humMax}% | Last: ${humLast}%</div>`;
 
-        // Shared badge for both cards
-        const badgeClass = active > 0 ? 'active-badge' : 'silent-badge';
-        const badgeText  = active > 0
-            ? `${active} of ${total} nodes active`
-            : `No active nodes`;
-
-        const badge = `<span class="kpi-badge ${badgeClass}">${badgeText}</span>`;
-        this.kpiTempMeta.innerHTML = badge;
-        this.kpiHumMeta.innerHTML  = badge;
+        // --- Meta/Badge ---
+        const activeNodes = this.nodes.filter(n => n.status === 'transmitting');
+        const total = this.nodes.length;
+        const active = activeNodes.length;
+        let metaText = '';
+        if (active > 0) {
+            // Show last update time if available
+            const lastUpdate = Math.max(...this.nodes.map(n => n.timestamp ? n.timestamp.getTime() : 0));
+            if (lastUpdate > 0) {
+                const date = new Date(lastUpdate);
+                metaText = `<span class="kpi-badge active-badge">${active} of ${total} nodes active</span> <span class="kpi-update">Last update: ${date.toLocaleTimeString()}</span>`;
+            } else {
+                metaText = `<span class="kpi-badge active-badge">${active} of ${total} nodes active</span>`;
+            }
+        } else {
+            metaText = `<span class="kpi-badge silent-badge">No active nodes</span>`;
+        }
+        this.kpiTempMeta.innerHTML = metaText;
+        this.kpiHumMeta.innerHTML = metaText;
     }
 
     // ── TABLE ─────────────────────────────────────────────────────────────────
