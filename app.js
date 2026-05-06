@@ -3,7 +3,6 @@
 
 class AgricultureDashboard {
     constructor() {
-        this.client = null;
         this.username = '';
         this.aioKey = '';
         this.connected = false;
@@ -20,11 +19,10 @@ class AgricultureDashboard {
 
         this.initElements();
         this.bindEvents();
-        this.loadSavedCredentials();
         this.loadSavedNodeData();
         this.initTheme();
         this.renderTable();
-        this.autoConnectIfPossible();
+        this.startSupabaseSubscription();
     }
 
     // ── DOM REFS ──────────────────────────────────────────────────────────────
@@ -164,29 +162,35 @@ class AgricultureDashboard {
         }
     }
 
-    // ── CONNECT (from login) ──────────────────────────────────────────────────
-    connect() {
-        this.username = this.usernameInput.value.trim();
-        this.aioKey   = this.aioKeyInput.value.trim();
-
-        if (!this.username || !this.aioKey) {
-            this.showError('Please enter both username and AIO key.');
-            return;
-        }
-
-        if (!this.aioKey.startsWith('aio_')) {
-            this.showError('Invalid AIO key. It should start with "aio_".');
-            return;
-        }
-
-        this.hideError();
-        this.setConnectBtn('connecting');
-
-        try {
-            this.attemptConnection(false);
-        } catch (err) {
-            this.handleConnectionError(err.message);
-        }
+    // ── START SUPABASE SUBSCRIPTION ───────────────────────────────────────────
+    startSupabaseSubscription() {
+        this.supabaseSubscription = this.supabase
+            .channel('sensor_readings_changes')
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'sensor_readings'
+            }, (payload) => {
+                this.handleSupabaseInsert(payload.new);
+            })
+            .subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    this.connected = true;
+                    this.startTime = new Date();
+                    this.messageCount = 0;
+                    this.startStatusCheck();
+                    this.startUptimeClock();
+                    this.updateStats();
+                    this.addSystemLog('Connected to Supabase real-time.');
+                } else if (status === 'CHANNEL_ERROR') {
+                    this.addSystemLog('Supabase subscription error.');
+                } else if (status === 'TIMED_OUT') {
+                    this.addSystemLog('Supabase subscription timed out.');
+                } else if (status === 'CLOSED') {
+                    this.connected = false;
+                    this.updateConnectionStatus();
+                }
+            });
     }
 
     // ── RECONNECT (stay on dashboard) ─────────────────────────────────────────
@@ -220,7 +224,7 @@ class AgricultureDashboard {
         this.isReconnecting = isReconnect;
 
         const clientId  = `dashboard_${Math.random().toString(16).substr(2, 8)}`;
-        const brokerUrl = 'wss://io.adafruit.com/mqtt';
+        const brokerUrl = 'wss://io.adafruit.com:443/mqtt';
 
         const client = mqtt.connect(brokerUrl, {
             clientId,
@@ -346,6 +350,31 @@ class AgricultureDashboard {
             node.timestamp = null;
             node.status    = 'silent';
         });
+    }
+
+    // ── SUPABASE INSERT HANDLER ───────────────────────────────────────────────
+    handleSupabaseInsert(reading) {
+        this.messageCount++;
+
+        const location = reading.location;
+        const sensorType = reading.sensor_type; // temp or hum
+        const value = reading.value;
+
+        const node = this.nodes.find(n => n.location.toLowerCase() === location.toLowerCase());
+        if (!node) return;
+
+        if (sensorType === 'temp') {
+            node.temp = value.toFixed(1);
+        } else if (sensorType === 'hum') {
+            node.hum = value.toFixed(1);
+        }
+        node.timestamp = new Date(reading.timestamp);
+
+        this.updateNodeStatus(node);
+        this.renderTable();
+        this.addLogEntry(`${location}-${sensorType}`, value, sensorType === 'temp');
+        this.updateStats();
+        this.saveNodeData();
     }
 
     // ── MESSAGE HANDLER ───────────────────────────────────────────────────────
