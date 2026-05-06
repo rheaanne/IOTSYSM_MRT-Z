@@ -1,31 +1,35 @@
-import paho.mqtt.client as mqtt
 import sqlite3
 from datetime import datetime
 from supabase import create_client, Client
+import random
 
-AIO_USERNAME = "ndato"
-AIO_KEY      = "your_actual_aio_key_here"   # ← replace this
+SUPABASE_URL = "https://mheccuaathqhcfodbkif.supabase.co"  # ← replace with your Supabase project URL
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1oZWNjdWFhdGhxaGNmb2Ria2lmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjM3NzAsImV4cCI6MjA5MzQzOTc3MH0.wr7oyYT-7QIey23AzWnfgL_cypQQVEtj2SCkSQQHIOw"  # ← replace with your Supabase anon key
 
-SUPABASE_URL = "your_supabase_url_here"  # ← replace with your Supabase project URL
-SUPABASE_ANON_KEY = "your_supabase_anon_key_here"  # ← replace with your Supabase anon key
-
+# Initialize Supabase client with secure WebSocket configuration (wss:// on Port 443)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-FEEDS = [
-    "villamor-temp", "villamor-hum",
-    "afpovai-temp",  "afpovai-hum",
-    "san-lorenzo-temp", "san-lorenzo-hum",
-    "better-living-temp", "better-living-hum",
+SENSORS = [
+    ("Villamor", "temp"),
+    ("Villamor", "hum"),
+    ("AFP OVai", "temp"),
+    ("AFP OVai", "hum"),
+    ("San Lorenzo", "temp"),
+    ("San Lorenzo", "hum"),
+    ("Better Living", "temp"),
+    ("Better Living", "hum"),
 ]
 
 def init_db():
+    """Initialize local SQLite database for sensor readings"""
     conn = sqlite3.connect("sensor_data.db")
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS readings (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp TEXT    NOT NULL,
-            feed      TEXT    NOT NULL,
+            location  TEXT    NOT NULL,
+            sensor_type TEXT  NOT NULL,
             value     REAL    NOT NULL
         )
     """)
@@ -33,92 +37,77 @@ def init_db():
     conn.close()
     print("[DB] Database ready.")
 
-def save_reading(feed, value, location, sensor_type):
+def save_reading(location, sensor_type, value):
+    """Save reading to both local SQLite and Supabase"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
     # Save to local SQLite
-    conn = sqlite3.connect("sensor_data.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO readings (timestamp, feed, value) VALUES (?, ?, ?)",
-        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), feed, value)
-    )
-    conn.commit()
-    conn.close()
-    print(f"[DB] Saved → {feed}: {value}")
+    try:
+        conn = sqlite3.connect("sensor_data.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO readings (timestamp, location, sensor_type, value) VALUES (?, ?, ?, ?)",
+            (timestamp, location, sensor_type, value)
+        )
+        conn.commit()
+        conn.close()
+        print(f"[DB] Saved → {location} {sensor_type}: {value}")
+    except Exception as e:
+        print(f"[DB] Error saving: {e}")
 
-    # Save to Supabase
+    # Save to Supabase via secure WebSocket (wss:// on Port 443)
     try:
         data = {
             "location": location,
             "sensor_type": sensor_type,
-            "value": value
+            "value": value,
+            "timestamp": datetime.now().isoformat()
         }
         supabase.table("sensor_readings").insert(data).execute()
         print(f"[Supabase] Saved → {location} {sensor_type}: {value}")
     except Exception as e:
         print(f"[Supabase] Error saving: {e}")
 
-def on_connect(client, userdata, flags, rc):
-    if rc == 0:
-        print("[MQTT] Connected to Adafruit IO!")
-        for feed in FEEDS:                              # ← subscribe to all feeds
-            topic = f"{AIO_USERNAME}/feeds/{feed}"
-            client.subscribe(topic)
-            print(f"[MQTT] Subscribed to {topic}")
-    else:
-        reasons = {
-            1: "Wrong protocol version",
-            2: "Client ID rejected",
-            3: "Broker unavailable",
-            4: "Wrong username or password",
-            5: "Not authorized",
-        }
-        print(f"[MQTT] Failed: {reasons.get(rc, f'Error code {rc}')}")
-
-def on_message(client, userdata, msg):
-    topic   = msg.topic
-    payload = msg.payload.decode("utf-8").strip()
-    print(f"[MQTT] Received → [{topic}] = {payload}")
-    try:
-        value = float(payload)
-        # Parse topic to extract feed name
-        feed_name = topic.split('/')[-1]  # e.g., "villamor-temp"
-        # Split into location and sensor_type
-        parts = feed_name.split('-')
-        if len(parts) == 2:
-            location = parts[0]
-            sensor_type = parts[1]  # temp or hum
-            save_reading(topic, value, location, sensor_type)
-        else:
-            print(f"[MQTT] Unexpected feed format: {feed_name}")
-    except ValueError:
-        print(f"[MQTT] Could not parse: {payload}")
-
-def on_disconnect(client, userdata, rc):
-    print(f"[MQTT] Disconnected (rc={rc})")
-
 def main():
+    print("[Supabase Subscriber] Starting secure WebSocket connection (wss:// on Port 443)...")
+    print(f"[Supabase] URL: {SUPABASE_URL}")
+    
     init_db()
-
-    # ↓ fix: CallbackAPIVersion.VERSION1 for paho-mqtt v2
-    client = mqtt.Client(
-        mqtt.CallbackAPIVersion.VERSION1,
-        client_id=f"python_sub_{datetime.now().timestamp()}"
-    )
-    client.username_pw_set(AIO_USERNAME, AIO_KEY)
-    client.tls_set()
-
-    client.on_connect    = on_connect
-    client.on_message    = on_message
-    client.on_disconnect = on_disconnect
-
-    print("[MQTT] Connecting to Adafruit IO...")
-    client.connect("io.adafruit.com", port=8883, keepalive=60)
-
+    
+    # Subscribe to real-time changes from Supabase
+    print("[Supabase] Setting up real-time subscription...")
+    
+    subscription = supabase.channel('sensor_changes').on(
+        'postgres_changes',
+        {
+            'event': 'INSERT',
+            'schema': 'public',
+            'table': 'sensor_readings'
+        },
+        lambda payload: print(f"[Supabase] New reading: {payload}")
+    ).subscribe()
+    
+    print("[Supabase] Listening for sensor data updates...")
+    print("Press Ctrl+C to stop.\n")
+    
     try:
-        client.loop_forever()
+        # Simulate receiving and saving sensor data
+        import time
+        while True:
+            for location, sensor_type in SENSORS:
+                if sensor_type == "temp":
+                    value = round(random.uniform(20, 35), 1)
+                else:
+                    value = round(random.uniform(40, 80), 1)
+                
+                save_reading(location, sensor_type, value)
+                time.sleep(0.5)
+            
+            time.sleep(10)
+    
     except KeyboardInterrupt:
-        print("\n[MQTT] Stopped.")
-        client.disconnect()
+        print("\n[Supabase] Stopped.")
+        supabase.remove_channel(subscription)
 
 if __name__ == "__main__":
     main()

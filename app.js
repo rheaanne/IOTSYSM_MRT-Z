@@ -1,72 +1,89 @@
 // Smart Agriculture IoT Dashboard
-// v4 — Added Temperature & Humidity KPI cards
+// v7 — Supabase Real-Time WebSocket (wss://) + REST API History
+// Uses sensor_logs table with feed_name schema
 
 class AgricultureDashboard {
     constructor() {
-        this.username = '';
-        this.aioKey = '';
         this.connected = false;
         this.startTime = null;
         this.messageCount = 0;
         this.statusCheckInterval = null;
         this.uptimeInterval = null;
-        this.isReconnecting = false;
+        this.supabaseSubscription = null;
 
-        // Supabase config - replace with your actual values
-        this.SUPABASE_URL = 'your_supabase_url_here';
-        this.SUPABASE_ANON_KEY = 'your_supabase_anon_key_here';
-        this.supabase = supabase.createClient(this.SUPABASE_URL, this.SUPABASE_ANON_KEY);
+        // Load configuration
+        if (typeof config === 'undefined') {
+            console.error('[Dashboard] Config not loaded!');
+            alert('Configuration error: config.js not loaded.');
+            return;
+        }
+
+        this.SUPABASE_URL = config.getSupabaseUrl();
+        this.SUPABASE_ANON_KEY = config.getSupabaseAnonKey();
+        this.SENSOR_NODES = config.SENSOR_NODES;
+
+        if (this.SUPABASE_URL && this.SUPABASE_ANON_KEY) {
+            try {
+                this.supabase = supabase.createClient(this.SUPABASE_URL, this.SUPABASE_ANON_KEY, {
+                    realtime: { params: { eventsPerSecond: 10 } }
+                });
+                console.log('[Supabase] Client initialized');
+            } catch (err) {
+                console.error('[Supabase] Failed to initialize:', err.message);
+                alert('Error: Supabase initialization failed.');
+                return;
+            }
+        } else {
+            console.error('[Supabase] Configuration missing');
+            alert('Error: Supabase configuration missing.');
+            return;
+        }
 
         this.initElements();
         this.bindEvents();
+        
+        // Initialize sensor nodes (from config)
+        this.nodes = this.SENSOR_NODES.map(n => ({
+            ...n,
+            temp: '--',
+            hum: '--',
+            timestamp: null,
+            status: 'silent'
+        }));
+
         this.loadSavedNodeData();
         this.initTheme();
         this.renderTable();
+        
+        // Start Supabase real-time subscription (WebSocket on port 443)
         this.startSupabaseSubscription();
     }
 
     // ── DOM REFS ──────────────────────────────────────────────────────────────
     initElements() {
-        // Login
-        this.loginPage       = document.getElementById('login-page');
-        this.loginForm       = document.getElementById('login-form');
-        this.usernameInput   = document.getElementById('username');
-        this.aioKeyInput     = document.getElementById('aio-key');
-        this.loginError      = document.getElementById('login-error');
-        this.errorText       = document.getElementById('error-text');
-        this.connectBtn      = document.getElementById('connect-btn');
-
-        // Dashboard
         this.dashPage        = document.getElementById('dashboard-page');
         this.disconnectBtn   = document.getElementById('disconnect-btn');
         this.refreshBtn      = document.getElementById('refresh-btn');
-        this.refreshIcon     = document.getElementById('refresh-icon');
         this.themeToggle     = document.getElementById('theme-toggle');
         this.themeIcon       = document.getElementById('theme-icon');
 
-        // Status
         this.connLed         = document.getElementById('conn-led');
         this.connText        = document.getElementById('conn-text');
 
-        // Table
         this.tableBody       = document.getElementById('sensor-table-body');
         this.activeCount     = document.getElementById('active-count');
 
-        // KPI Cards
         this.kpiTempVal      = document.getElementById('kpi-temp-val');
         this.kpiTempMeta     = document.getElementById('kpi-temp-meta');
         this.kpiHumVal       = document.getElementById('kpi-hum-val');
         this.kpiHumMeta      = document.getElementById('kpi-hum-meta');
 
-        // Log
         this.logContent      = document.getElementById('mqtt-log-content');
         this.clearLogBtn     = document.getElementById('clear-log');
 
-        // History
         this.historyContent  = document.getElementById('history-content');
         this.loadHistoryBtn  = document.getElementById('load-history-btn');
 
-        // Stats
         this.activeFeeds     = document.getElementById('active-feeds');
         this.messagesPerHour = document.getElementById('messages-per-hour');
         this.uptimeEl        = document.getElementById('uptime');
@@ -74,11 +91,6 @@ class AgricultureDashboard {
 
     // ── EVENTS ────────────────────────────────────────────────────────────────
     bindEvents() {
-        this.loginForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.connect();
-        });
-
         this.disconnectBtn.addEventListener('click', () => this.disconnect());
         this.refreshBtn.addEventListener('click', () => this.reconnect());
         this.themeToggle.addEventListener('click', () => this.toggleTheme());
@@ -86,14 +98,7 @@ class AgricultureDashboard {
         this.loadHistoryBtn.addEventListener('click', () => this.loadHistory());
     }
 
-    // ── CREDENTIALS ───────────────────────────────────────────────────────────
-    loadSavedCredentials() {
-        const savedUser = localStorage.getItem('adafruit_username');
-        const savedKey  = localStorage.getItem('adafruit_aiokey');
-        if (savedUser) this.usernameInput.value = savedUser;
-        if (savedKey)  this.aioKeyInput.value   = savedKey;
-    }
-
+    // ── NODE DATA PERSISTENCE ─────────────────────────────────────────────────
     loadSavedNodeData() {
         const savedData = localStorage.getItem('node_data');
         if (savedData) {
@@ -124,19 +129,14 @@ class AgricultureDashboard {
         localStorage.setItem('node_data', JSON.stringify(data));
     }
 
-    saveCredentials() {
-        localStorage.setItem('adafruit_username', this.username);
-        localStorage.setItem('adafruit_aiokey',   this.aioKey);
-    }
-
-    autoConnectIfPossible() {
-        const savedUser = localStorage.getItem('adafruit_username');
-        const savedKey  = localStorage.getItem('adafruit_aiokey');
-        if (savedUser && savedKey) {
-            this.username = savedUser;
-            this.aioKey   = savedKey;
-            this.connect();
-        }
+    resetNodeData() {
+        this.nodes.forEach(n => {
+            n.temp = '--';
+            n.hum = '--';
+            n.timestamp = null;
+            n.status = 'silent';
+        });
+        this.saveNodeData();
     }
 
     // ── THEME ─────────────────────────────────────────────────────────────────
@@ -162,14 +162,17 @@ class AgricultureDashboard {
         }
     }
 
-    // ── START SUPABASE SUBSCRIPTION ───────────────────────────────────────────
+    // ── SUPABASE REAL-TIME SUBSCRIPTION (WebSocket wss:// on Port 443) ────────
     startSupabaseSubscription() {
+        console.log('[Supabase] Establishing secure WebSocket (wss://) on Port 443...');
+        this.addSystemLog('Connecting to Supabase real-time...');
+        
         this.supabaseSubscription = this.supabase
-            .channel('sensor_readings_changes')
+            .channel('sensor_logs_changes')
             .on('postgres_changes', {
                 event: 'INSERT',
                 schema: 'public',
-                table: 'sensor_readings'
+                table: 'sensor_logs'
             }, (payload) => {
                 this.handleSupabaseInsert(payload.new);
             })
@@ -181,231 +184,98 @@ class AgricultureDashboard {
                     this.startStatusCheck();
                     this.startUptimeClock();
                     this.updateStats();
-                    this.addSystemLog('Connected to Supabase real-time.');
+                    console.log('[Supabase] ✓ Connected via wss:// on Port 443');
+                    this.addSystemLog('✓ Connected via secure WebSocket (wss://) on Port 443');
+                    this.updateConnectionStatus();
                 } else if (status === 'CHANNEL_ERROR') {
-                    this.addSystemLog('Supabase subscription error.');
+                    console.error('[Supabase] Subscription error');
+                    this.addSystemLog('✗ WebSocket subscription error');
+                    this.connected = false;
+                    this.updateConnectionStatus();
                 } else if (status === 'TIMED_OUT') {
-                    this.addSystemLog('Supabase subscription timed out.');
+                    console.error('[Supabase] WebSocket connection timed out');
+                    this.addSystemLog('✗ WebSocket connection timed out');
+                    this.connected = false;
+                    this.updateConnectionStatus();
                 } else if (status === 'CLOSED') {
                     this.connected = false;
+                    console.log('[Supabase] WebSocket connection closed');
                     this.updateConnectionStatus();
                 }
             });
     }
 
-    // ── RECONNECT (stay on dashboard) ─────────────────────────────────────────
+    // ── RECONNECT ─────────────────────────────────────────────────────────────
     reconnect() {
-        if (this.isReconnecting) return;
-
-        if (this.client) {
-            try { this.client.end(true); } catch (_) {}
-            this.client = null;
+        this.addSystemLog('Attempting to reconnect...');
+        
+        if (this.supabaseSubscription) {
+            try {
+                this.supabase.removeChannel(this.supabaseSubscription);
+            } catch (_) {}
         }
+        
         clearInterval(this.statusCheckInterval);
         clearInterval(this.uptimeInterval);
         this.statusCheckInterval = null;
         this.uptimeInterval = null;
         this.connected = false;
-
-        this.setRefreshBtn('reconnecting');
+        
         this.updateConnectionStatus();
-        this.addSystemLog('Reconnecting to feeds…');
-
-        try {
-            this.attemptConnection(true);
-        } catch (err) {
-            this.setRefreshBtn('idle');
-            this.addSystemLog(`Reconnect failed: ${err.message}`);
-        }
+        this.startSupabaseSubscription();
     }
 
-    // ── ATTEMPT CONNECTION ────────────────────────────────────────────────────
-    attemptConnection(isReconnect) {
-        this.isReconnecting = isReconnect;
-
-        const clientId  = `dashboard_${Math.random().toString(16).substr(2, 8)}`;
-        const brokerUrl = 'wss://io.adafruit.com:443/mqtt';
-
-        const client = mqtt.connect(brokerUrl, {
-            clientId,
-            username:        this.username,
-            password:        this.aioKey,
-            protocolId:      'MQTT',
-            protocolVersion: 4,
-            clean:           true,
-            keepalive:       60,
-            reconnectPeriod: 0,
-            connectTimeout:  10000,
-        });
-
-        let resolved = false;
-
-        const fail = (reason) => {
-            if (resolved) return;
-            resolved = true;
-            try { client.end(true); } catch (_) {}
-            this.isReconnecting = false;
-
-            if (isReconnect) {
-                this.setRefreshBtn('idle');
-                this.addSystemLog(`Reconnect failed: ${reason}`);
-            } else {
-                this.handleConnectionError(reason);
-            }
-        };
-
-        client.on('connect', (connack) => {
-            if (resolved) return;
-
-            if (connack.returnCode !== 0) {
-                const reasons = { 4: 'Wrong username or password.', 5: 'Not authorized.' };
-                fail(reasons[connack.returnCode] || `Connection refused (code ${connack.returnCode}).`);
-                return;
-            }
-
-            resolved = true;
-            this.client = client;
-            this.isReconnecting = false;
-            this.onConnected(client, isReconnect);
-        });
-
-        client.on('error', (err) => fail(err.message));
-        client.on('close', () => {
-            if (!resolved) fail('Connection closed before authentication completed.');
-        });
-
-        setTimeout(() => fail('Connection timed out after 10 seconds.'), 10000);
-    }
-
-    // ── ON CONNECTED ──────────────────────────────────────────────────────────
-    onConnected(client, isReconnect) {
-        client.on('message', (topic, message) => this.handleMessage(topic, message));
-        client.on('error',   (err) => {
-            this.connected = false;
-            this.updateConnectionStatus();
-            console.error('MQTT error:', err.message);
-        });
-        client.on('close',   () => { this.connected = false; this.updateConnectionStatus(); });
-        client.on('offline', () => { this.connected = false; this.updateConnectionStatus(); });
-
-        this.connected    = true;
-        this.startTime    = new Date();
-        this.messageCount = 0;
-
-        this.saveCredentials();
-        this.setRefreshBtn('idle');
-        this.updateConnectionStatus();
-
-        if (!isReconnect) {
-            this.showDashboard();
-        } else {
-            this.addSystemLog('Reconnected successfully. Data preserved.');
-        }
-
-        this.subscribeToAllFeeds();
-        this.startStatusCheck();
-        this.startUptimeClock();
-        this.updateStats();
-    }
-
-    // ── DISCONNECT (go to login) ───────────────────────────────────────────────
+    // ── DISCONNECT ────────────────────────────────────────────────────────────
     disconnect() {
-        if (this.client) {
-            try { this.client.end(); } catch (_) {}
-            this.client = null;
+        if (this.supabaseSubscription) {
+            try {
+                this.supabase.removeChannel(this.supabaseSubscription);
+            } catch (_) {}
+            this.supabaseSubscription = null;
         }
+        
         this.connected = false;
+        this.addSystemLog('Disconnected from Supabase');
         clearInterval(this.statusCheckInterval);
         clearInterval(this.uptimeInterval);
         this.statusCheckInterval = null;
-        this.uptimeInterval      = null;
+        this.uptimeInterval = null;
 
         this.updateConnectionStatus();
-        this.showLogin();
-        this.setConnectBtn('idle');
+        this.resetNodeData();
+        this.renderTable();
     }
 
-    // ── SUBSCRIPTIONS ─────────────────────────────────────────────────────────
-    subscribeToAllFeeds() {
-        this.nodes.forEach(node => {
-            const tempTopic = `${this.username}/feeds/${node.tempFeed}`;
-            const humTopic  = `${this.username}/feeds/${node.humFeed}`;
-
-            this.client.subscribe(tempTopic, (err) => {
-                if (err) console.error(`Subscribe error: ${tempTopic}`, err);
-                else console.log(`Subscribed to: ${tempTopic}`);
-            });
-            this.client.subscribe(humTopic, (err) => {
-                if (err) console.error(`Subscribe error: ${humTopic}`, err);
-                else console.log(`Subscribed to: ${humTopic}`);
-            });
-        });
+    // ── PARSE FEED NAME ────────────────────────────────────────────────────────
+    // Feed name format: "VLM-01-temperature" or "VLM-01-humidity"
+    parseFeedName(feedName) {
+        const parts = feedName.split('-');
+        const nodeId = parts.slice(0, 2).join('-'); // "VLM-01"
+        const type = parts.slice(2).join('-');      // "temperature" or "humidity"
+        return { nodeId, type };
     }
 
-    // ── RESET NODE DATA ───────────────────────────────────────────────────────
-    resetNodeData() {
-        this.nodes.forEach(node => {
-            node.temp      = '--';
-            node.hum       = '--';
-            node.timestamp = null;
-            node.status    = 'silent';
-        });
-    }
-
-    // ── SUPABASE INSERT HANDLER ───────────────────────────────────────────────
+    // ── HANDLE NEW READINGS FROM SENSOR_LOGS ──────────────────────────────────
     handleSupabaseInsert(reading) {
         this.messageCount++;
 
-        const location = reading.location;
-        const sensorType = reading.sensor_type; // temp or hum
+        const { nodeId, type } = this.parseFeedName(reading.feed_name);
         const value = reading.value;
+        const createdAt = new Date(reading.created_at);
 
-        const node = this.nodes.find(n => n.location.toLowerCase() === location.toLowerCase());
+        const node = this.nodes.find(n => n.id === nodeId);
         if (!node) return;
 
-        if (sensorType === 'temp') {
+        if (type === 'temperature') {
             node.temp = value.toFixed(1);
-        } else if (sensorType === 'hum') {
+        } else if (type === 'humidity') {
             node.hum = value.toFixed(1);
         }
-        node.timestamp = new Date(reading.timestamp);
+        node.timestamp = createdAt;
 
         this.updateNodeStatus(node);
         this.renderTable();
-        this.addLogEntry(`${location}-${sensorType}`, value, sensorType === 'temp');
-        this.updateStats();
-        this.saveNodeData();
-    }
-
-    // ── MESSAGE HANDLER ───────────────────────────────────────────────────────
-    handleMessage(topic, message) {
-        const raw   = message.toString().trim();
-        console.log(`[MQTT] Received: ${topic} = ${raw}`);
-        const value = parseFloat(raw);
-        if (isNaN(value)) {
-            console.warn(`[MQTT] Invalid value: ${raw}`);
-            return;
-        }
-
-        this.messageCount++;
-
-        const parts    = topic.split('/');
-        const feedName = parts[parts.length - 1];
-        const node     = this.nodes.find(n => n.tempFeed === feedName || n.humFeed === feedName);
-        if (!node) return;
-
-        const isTemp = feedName === node.tempFeed;
-
-        if (isTemp) {
-            node.temp = value.toFixed(1);
-        } else {
-            node.hum = value.toFixed(1);
-        }
-        node.timestamp = new Date();
-
-        this.updateNodeStatus(node);
-        this.renderTable();
-        this.addLogEntry(feedName, value, isTemp);
+        this.addLogEntry(reading.feed_name, value);
         this.updateStats();
         this.saveNodeData();
     }
@@ -437,21 +307,16 @@ class AgricultureDashboard {
 
     // ── KPI CARDS ─────────────────────────────────────────────────────────────
     renderKpiCards() {
-        // --- Temperature KPI ---
+        // Temperature KPI
         const nodesWithTemp = this.nodes.filter(n => n.temp !== '--');
         let tempVals = nodesWithTemp.map(n => parseFloat(n.temp));
         let tempDisplay = '--';
-        let tempMin = '--', tempMax = '--', tempLast = '--', tempTrend = '';
         if (tempVals.length > 0) {
             const avgTemp = tempVals.reduce((s, v) => s + v, 0) / tempVals.length;
-            tempMin = Math.min(...tempVals).toFixed(1);
-            tempMax = Math.max(...tempVals).toFixed(1);
-            tempLast = nodesWithTemp[nodesWithTemp.length - 1].temp;
-            // Trend: compare last two averages
+            const tempMin = Math.min(...tempVals).toFixed(1);
+            const tempMax = Math.max(...tempVals).toFixed(1);
             if (!this.prevAvgTemp) this.prevAvgTemp = avgTemp;
-            if (avgTemp > this.prevAvgTemp) tempTrend = '↑';
-            else if (avgTemp < this.prevAvgTemp) tempTrend = '↓';
-            else tempTrend = '→';
+            const tempTrend = avgTemp > this.prevAvgTemp ? '↑' : avgTemp < this.prevAvgTemp ? '↓' : '→';
             this.prevAvgTemp = avgTemp;
             tempDisplay = `${avgTemp.toFixed(1)}<span>°C</span> <span class="kpi-trend">${tempTrend}</span>`;
         } else {
@@ -459,21 +324,14 @@ class AgricultureDashboard {
         }
         this.kpiTempVal.innerHTML = tempDisplay;
 
-        // --- Humidity KPI ---
+        // Humidity KPI
         const nodesWithHum = this.nodes.filter(n => n.hum !== '--');
         let humVals = nodesWithHum.map(n => parseFloat(n.hum));
         let humDisplay = '--';
-        let humMin = '--', humMax = '--', humLast = '--', humTrend = '';
         if (humVals.length > 0) {
             const avgHum = humVals.reduce((s, v) => s + v, 0) / humVals.length;
-            humMin = Math.min(...humVals).toFixed(1);
-            humMax = Math.max(...humVals).toFixed(1);
-            humLast = nodesWithHum[nodesWithHum.length - 1].hum;
-            // Trend: compare last two averages
             if (!this.prevAvgHum) this.prevAvgHum = avgHum;
-            if (avgHum > this.prevAvgHum) humTrend = '↑';
-            else if (avgHum < this.prevAvgHum) humTrend = '↓';
-            else humTrend = '→';
+            const humTrend = avgHum > this.prevAvgHum ? '↑' : avgHum < this.prevAvgHum ? '↓' : '→';
             this.prevAvgHum = avgHum;
             humDisplay = `${avgHum.toFixed(1)}<span>%</span> <span class="kpi-trend">${humTrend}</span>`;
         } else {
@@ -481,17 +339,16 @@ class AgricultureDashboard {
         }
         this.kpiHumVal.innerHTML = humDisplay;
 
-        // --- Meta/Badge ---
+        // Meta
         const activeNodes = this.nodes.filter(n => n.status === 'transmitting');
         const total = this.nodes.length;
         const active = activeNodes.length;
         let metaText = '';
         if (active > 0) {
-            // Show last update time if available
             const lastUpdate = Math.max(...this.nodes.map(n => n.timestamp ? n.timestamp.getTime() : 0));
             if (lastUpdate > 0) {
                 const date = new Date(lastUpdate);
-                metaText = `<span class="kpi-badge active-badge">${active} of ${total} nodes active</span> <span class="kpi-update">Last update: ${date.toLocaleTimeString()}</span>`;
+                metaText = `<span class="kpi-badge active-badge">${active} of ${total} nodes active</span> <span class="kpi-update">Last: ${date.toLocaleTimeString()}</span>`;
             } else {
                 metaText = `<span class="kpi-badge active-badge">${active} of ${total} nodes active</span>`;
             }
@@ -509,7 +366,6 @@ class AgricultureDashboard {
 
         this.nodes.forEach(node => {
             const row = document.createElement('tr');
-
             const timeStr  = node.timestamp ? node.timestamp.toLocaleTimeString() : '--';
             const tempDisp = node.temp === '--' ? '--' : `${node.temp}°C`;
             const humDisp  = node.hum  === '--' ? '--' : `${node.hum}%`;
@@ -527,7 +383,6 @@ class AgricultureDashboard {
                 </td>
                 <td><span class="time-val">${timeStr}</span></td>
             `;
-
             this.tableBody.appendChild(row);
         });
 
@@ -536,18 +391,19 @@ class AgricultureDashboard {
     }
 
     // ── LOG ───────────────────────────────────────────────────────────────────
-    addLogEntry(feedName, value, isTemp) {
+    addLogEntry(feedName, value) {
         const empty = this.logContent.querySelector('.log-empty');
         if (empty) empty.remove();
 
         const entry = document.createElement('div');
-        entry.className = `log-entry ${isTemp ? 'temp' : 'hum'}`;
+        entry.className = 'log-entry';
+        const { type } = this.parseFeedName(feedName);
+        const unit = type === 'temperature' ? '°C' : '%';
 
-        const unit = isTemp ? '°C' : '%';
         entry.innerHTML = `
             <span class="log-ts">[${new Date().toLocaleTimeString()}]</span>
             <span class="log-feed">${feedName}</span>
-            <span class="log-val">${value}${unit}</span>
+            <span class="log-val">${value.toFixed(1)}${unit}</span>
         `;
 
         this.logContent.appendChild(entry);
@@ -601,69 +457,25 @@ class AgricultureDashboard {
         }, 1000);
     }
 
-    // ── BUTTON STATES ─────────────────────────────────────────────────────────
-    setConnectBtn(state) {
-        const btnText = this.connectBtn.querySelector('.btn-text');
-        if (state === 'connecting') {
-            btnText.textContent = 'Connecting…';
-            this.connectBtn.disabled = true;
-        } else {
-            btnText.textContent = 'Connect to Network';
-            this.connectBtn.disabled = false;
-        }
-    }
-
-    setRefreshBtn(state) {
-        if (state === 'reconnecting') {
-            this.refreshBtn.disabled = true;
-            this.refreshBtn.classList.add('spinning');
-            this.refreshBtn.querySelector('.refresh-label').textContent = 'Reconnecting…';
-        } else {
-            this.refreshBtn.disabled = false;
-            this.refreshBtn.classList.remove('spinning');
-            this.refreshBtn.querySelector('.refresh-label').textContent = 'Reconnect';
-        }
-    }
-
-    // ── ERROR DISPLAY ─────────────────────────────────────────────────────────
-    showError(msg) {
-        this.errorText.textContent = msg;
-        this.loginError.classList.remove('hidden');
-    }
-
-    hideError() {
-        this.loginError.classList.add('hidden');
-    }
-
-    handleConnectionError(msg) {
-        this.showError(msg);
-        this.setConnectBtn('idle');
-    }
-
-    // ── PAGE SWITCHING ────────────────────────────────────────────────────────
-    showDashboard() {
-        this.loginPage.classList.add('hidden');
-        this.dashPage.classList.remove('hidden');
-    }
-
-    showLogin() {
-        this.dashPage.classList.add('hidden');
-        this.loginPage.classList.remove('hidden');
-    }
-
-    // ── LOAD HISTORY FROM SUPABASE ─────────────────────────────────────────────
+    // ── LOAD HISTORY VIA REST API ─────────────────────────────────────────────
     async loadHistory() {
         this.loadHistoryBtn.disabled = true;
         this.loadHistoryBtn.textContent = 'Loading…';
 
         try {
-            const { data, error } = await this.supabase
-                .from('sensor_readings')
-                .select('*')
-                .order('timestamp', { ascending: false })
-                .limit(50);
+            // Use Supabase REST API to fetch historical logs
+            const response = await fetch(
+                `${this.SUPABASE_URL}/rest/v1/sensor_logs?order=created_at.desc&limit=100`,
+                {
+                    headers: {
+                        'apikey': this.SUPABASE_ANON_KEY,
+                        'Content-Type': 'application/json'
+                    }
+                }
+            );
 
-            if (error) throw error;
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
 
             this.historyContent.innerHTML = '';
 
@@ -672,22 +484,21 @@ class AgricultureDashboard {
                 return;
             }
 
-            data.forEach(reading => {
+            data.forEach(log => {
                 const entry = document.createElement('div');
-                entry.className = `history-entry ${reading.sensor_type}`;
-                const timestamp = new Date(reading.timestamp).toLocaleString();
+                entry.className = 'history-entry';
+                const timestamp = new Date(log.created_at).toLocaleString();
                 entry.innerHTML = `
                     <span class="history-ts">[${timestamp}]</span>
-                    <span class="history-location">${reading.location}</span>
-                    <span class="history-type">${reading.sensor_type}</span>
-                    <span class="history-value">${reading.value}</span>
+                    <span class="history-feed">${log.feed_name}</span>
+                    <span class="history-value">${log.value}</span>
                 `;
                 this.historyContent.appendChild(entry);
             });
 
         } catch (err) {
             console.error('Error loading history:', err);
-            this.historyContent.innerHTML = `<div class="log-empty">Error loading data: ${err.message}</div>`;
+            this.historyContent.innerHTML = `<div class="log-empty">Error: ${err.message}</div>`;
         } finally {
             this.loadHistoryBtn.disabled = false;
             this.loadHistoryBtn.textContent = 'Load from Supabase';

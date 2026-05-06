@@ -1,53 +1,267 @@
-# Adafruit IO MQTT Subscriber
+# Smart Farm Network - IoT Agriculture Dashboard
 
-A browser-based MQTT subscriber that connects to Adafruit IO and displays real-time temperature and humidity data. Built with vanilla JavaScript and MQTT.js for use with GitHub Pages.
+Real-time agricultural sensor monitoring dashboard with **secure WebSocket (wss://)** on Port 443 and historical data via **Supabase REST API**.
 
 ## Features
 
-- **Secure WebSocket Connection**: Uses WSS to connect to Adafruit IO MQTT broker
-- **Real-time Data**: Live temperature and humidity updates
-- **User Authentication**: Enter your Adafruit IO username and AIO key
-- **Customizable Feeds**: Configure which feed keys to subscribe to
-- **Data History**: Shows recent sensor readings
-- **Auto-reconnect**: Automatically reconnects if connection drops
-- **Local Storage**: Saves credentials for convenience
-- **Debug Console**: Detailed logs with copy-to-clipboard
-- **Multi-URL Fallback**: Tries several broker addresses automatically
-- **Data Monitor**: Alerts if no data received within 30 seconds
-- **Subscription Display**: Shows exact MQTT topics you're subscribed to
+✓ **Real-Time WebSocket (wss://)** — Secure encrypted connection on Port 443  
+✓ **Live Sensor Feeds** — Temperature & humidity from 4+ locations  
+✓ **Historical Data** — Fetch past 100 readings via REST API  
+✓ **KPI Cards** — Average temperature/humidity with trend indicators (↑↓→)  
+✓ **Sensor Status** — Active/Silent status for each node  
+✓ **System Stats** — Uptime, message rate, active feed count  
+✓ **Dark/Light Theme** — Theme toggle with local storage  
+✓ **Responsive UI** — Mobile-friendly dashboard  
+✓ **Auto-Reconnect** — Handles disconnections gracefully  
 
 ## Quick Start
 
-### 1. Verify Your Arduino is Publishing
+### 1. Create Supabase Project
+- Go to [supabase.co](https://supabase.co)
+- Create a free project
+- Copy your Project URL and Anon Key
 
-**This is the most common issue.** Before using the web app, confirm your Arduino is successfully sending data to Adafruit IO.
-
-**Check in this order:**
-
-1. **Open Serial Monitor** in Arduino IDE (Ctrl+Shift+M) at 115200 baud
-2. Look for messages like:
-   ```
-   Connected to WiFi
-   Connected to MQTT broker!
-   Temperature: 25.5 sent
-   Humidity: 60.0 sent
-   ```
-3. **Visit Adafruit IO** (https://io.adafruit.com) → **Feeds** → your feed
-4. Confirm you see live data updating in the chart
-
-**If Arduino isn't connecting:**
-- Check WiFi credentials
-- Verify AIO key/username match Adafruit IO exactly
-- Ensure you called `mqtt.connect()` and checked `mqtt.connected()`
-- Look for error messages in Serial Monitor
-
-**Expected Arduino MQTT Topics:**
-```
-<your-username>/feeds/temperature
-<your-username>/feeds/humidity
+### 2. Update Configuration
+Edit `config.js`:
+```javascript
+const config = {
+    getSupabaseUrl() {
+        return 'https://YOUR_PROJECT.supabase.co'; // ← Replace
+    },
+    getSupabaseAnonKey() {
+        return 'eyJ...'; // ← Replace
+    },
+    // ... rest stays same
+};
 ```
 
-Example working Arduino code:
+### 3. Create Database Schema
+In Supabase SQL Editor, run [supabase_schema.sql](supabase_schema.sql)
+
+### 4. Start Publisher (Mock Sensors)
+```bash
+pip install supabase
+python publisher.py
+```
+
+### 5. Open Dashboard
+```bash
+# Option A: Python server
+python -m http.server 8000
+
+# Option B: VS Code Live Server
+# Right-click index.html → "Open with Live Server"
+```
+Then visit `http://localhost:8000`
+
+**For detailed setup**, see [SETUP.md](SETUP.md)
+
+---
+
+## Architecture
+
+### Data Flow
+```
+Publisher (publisher.py)
+    ↓ INSERT
+Supabase sensor_logs Table
+    ├→ WebSocket (wss://) Port 443 [Real-Time Subscription]
+    └→ REST API [Historical Queries]
+        ↓
+    Frontend Dashboard (index.html + app.js)
+```
+
+### Database Schema
+```sql
+CREATE TABLE sensor_logs (
+  id BIGINT PRIMARY KEY,           -- Auto-increment
+  feed_name TEXT,                  -- e.g., "VLM-01-temperature"
+  value FLOAT,                     -- e.g., 25.3
+  created_at TIMESTAMPTZ           -- Auto-timestamp
+);
+```
+
+### Feed Name Format
+Format: `{NodeID}-{Type}`
+
+Example feeds:
+- `VLM-01-temperature` → Villamor node, temperature reading
+- `VLM-01-humidity` → Villamor node, humidity reading
+- `AFP-01-temperature` → AFP OVai node, temperature
+- etc.
+
+---
+
+## File Overview
+
+| File | Purpose |
+|------|---------|
+| `index.html` | Dashboard UI (HTML structure) |
+| `app.js` | Main dashboard logic + WebSocket subscription |
+| `config.js` | Supabase credentials & sensor node definitions |
+| `style.css` | Styling (dark/light theme) |
+| `publisher.py` | Mock sensor data generator → Supabase |
+| `supabase_schema.sql` | Database schema creation |
+| `SETUP.md` | Complete setup guide |
+
+---
+
+## WebSocket Connection (Real-Time)
+
+The dashboard uses **Supabase Real-Time** to subscribe to sensor data changes:
+
+```javascript
+// Listens for INSERT events on sensor_logs
+supabase.channel('sensor_logs_changes')
+    .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'sensor_logs'
+    }, (payload) => {
+        // Handle new reading instantly
+        handleSupabaseInsert(payload.new);
+    })
+    .subscribe();
+```
+
+**Benefits**:
+- <100ms latency
+- TLS/SSL encrypted (wss://)
+- Port 443 (standard HTTPS)
+- Automatic reconnection
+- Handles network interruptions
+
+---
+
+## REST API for History
+
+Fetch past sensor readings:
+
+```javascript
+const response = await fetch(
+    `${SUPABASE_URL}/rest/v1/sensor_logs?order=created_at.desc&limit=100`,
+    { headers: { 'apikey': SUPABASE_ANON_KEY } }
+);
+const data = await response.json();
+```
+
+---
+
+## Sensor Nodes
+
+Currently configured for 4 locations:
+
+| Node ID | Location |
+|---------|----------|
+| VLM-01 | Villamor |
+| AFP-01 | AFP OVai |
+| SLZ-01 | San Lorenzo |
+| BLV-01 | Better Living |
+
+**To add more nodes:**
+1. Edit `config.js` → `SENSOR_NODES` array
+2. Update `publisher.py` → `SENSORS` array
+3. Restart publisher
+
+---
+
+## Dashboard Features
+
+### KPI Cards
+- **Average Temperature**: Shows avg of all nodes + trend
+- **Average Humidity**: Shows avg of all nodes + trend
+- **Active Nodes**: Count and last update time
+
+### Sensor Table
+Displays real-time status:
+- Sensor ID & Location
+- Current Temp & Humidity
+- Status badge (Transmitting/Silent)
+- Last update timestamp
+
+### Real-Time Log
+Shows each reading as it arrives, with:
+- Timestamp
+- Feed name
+- Value (°C or %)
+
+### System Stats
+- **Active Feeds**: Count of nodes currently transmitting
+- **Msg/Hour**: Message throughput
+- **Uptime**: Connection duration in HH:MM:SS
+
+### History Panel
+- Click "Load from Supabase" to fetch 100 past readings
+- Shows feed name, value, and timestamp
+- Point-in-time snapshot (not real-time)
+
+---
+
+## Troubleshooting
+
+### WebSocket Not Connecting
+- [ ] Verify `SUPABASE_URL` and `SUPABASE_ANON_KEY` in `config.js`
+- [ ] Check Supabase **Replication** is enabled for `sensor_logs`
+- [ ] Check browser console (F12) for errors
+- [ ] Try **Reconnect** button
+
+### No Data Arriving
+- [ ] Ensure `publisher.py` is running
+- [ ] Check Supabase Table Editor → `sensor_logs` has rows
+- [ ] Verify network tab shows `wss://` connection
+
+### History Empty
+- [ ] Wait a few moments for publisher to write data
+- [ ] Check Supabase Table Editor manually
+- [ ] Verify REST API endpoint in Network tab
+
+---
+
+## Security Notes
+
+⚠️ **Never commit credentials to git!**
+
+For production:
+1. Use environment variables
+2. Add `.env` to `.gitignore`
+3. Use GitHub Secrets for CI/CD
+4. Enable Supabase Row Level Security (RLS)
+
+See [SETUP.md](SETUP.md) for detailed security best practices.
+
+---
+
+## Browser Support
+
+- Chrome 90+
+- Firefox 88+
+- Safari 14+
+- Edge 90+
+
+Requires WebSocket support (all modern browsers).
+
+---
+
+## Next Steps
+
+1. [Set up Supabase project](SETUP.md#step-1-create-supabase-project)
+2. [Configure application](SETUP.md#step-3-configure-application)
+3. [Run publisher](SETUP.md#step-5-run-publisher-data-generator)
+4. [Open dashboard](#quick-start)
+5. [Connect real sensors](SETUP.md#advanced-connect-real-arduino-sensors)
+
+---
+
+## Resources
+
+- [Supabase Documentation](https://supabase.com/docs)
+- [Real-Time Guide](https://supabase.com/docs/guides/realtime)
+- [JavaScript Client API](https://supabase.com/docs/reference/javascript)
+
+---
+
+**Version**: 7.0 (Supabase wss:// + REST API)  
+**Last Updated**: May 2026
 ```cpp
 #include <WiFi.h>
 #include <Adafruit_MQTT.h>

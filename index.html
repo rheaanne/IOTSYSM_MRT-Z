@@ -11,8 +11,8 @@
 </head>
 <body data-theme="dark">
 
-<!-- LOGIN PAGE -->
-<div id="login-page" class="login-page">
+<!-- LOGIN PAGE (Hidden - Supabase only) -->
+<div id="login-page" class="login-page" style="display: none;">
     <div class="login-bg">
         <div class="grid-overlay"></div>
         <div class="orb orb-1"></div>
@@ -69,12 +69,12 @@
             </button>
         </form>
 
-        <p class="login-footer">Sensor data is transmitted via MQTT over WebSocket</p>
+        <p class="login-footer">Sensor data via Supabase real-time WebSocket (wss://) on Port 443</p>
     </div>
 </div>
 
 <!-- DASHBOARD PAGE -->
-<div id="dashboard-page" class="dashboard-page hidden">
+<div id="dashboard-page" class="dashboard-page">
 
     <header class="topbar">
         <div class="topbar-brand">
@@ -212,12 +212,12 @@
                 </div>
             </section>
 
-            <!-- MQTT LOG -->
+            <!-- REAL-TIME LOG -->
             <section class="panel log-panel">
                 <div class="panel-header">
                     <h3 class="panel-title">
                         <span class="panel-title-icon">📡</span>
-                        MQTT Log
+                        Real-Time Log
                     </h3>
                     <button class="btn-clear" id="clear-log">Clear</button>
                 </div>
@@ -231,6 +231,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

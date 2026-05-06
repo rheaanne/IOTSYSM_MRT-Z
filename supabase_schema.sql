@@ -1,14 +1,14 @@
--- Create sensor_readings table in Supabase
-CREATE TABLE sensor_readings (
-    id SERIAL PRIMARY KEY,
-    timestamp TIMESTAMPTZ DEFAULT NOW(),
-    location TEXT NOT NULL,
-    sensor_type TEXT NOT NULL CHECK (sensor_type IN ('temp', 'hum')),
-    value REAL NOT NULL
+-- Drop old table if it exists
+DROP TABLE IF EXISTS sensor_readings;
+
+-- Create sensor_logs table for historical data
+CREATE TABLE sensor_logs (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  feed_name TEXT NOT NULL,
+  value FLOAT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Optional: Create an index on timestamp for faster queries
-CREATE INDEX idx_sensor_readings_timestamp ON sensor_readings (timestamp);
-
--- Optional: Create an index on location
-CREATE INDEX idx_sensor_readings_location ON sensor_readings (location);
+-- Create indexes for performance
+CREATE INDEX idx_sensor_logs_feed_name ON sensor_logs (feed_name);
+CREATE INDEX idx_sensor_logs_created_at ON sensor_logs (created_at DESC);
