@@ -169,6 +169,20 @@
                     </table>
                 </div>
             </section>
+
+            <!-- HISTORY CHART -->
+            <section class="panel history-panel history-panel-main">
+                <div class="panel-header">
+                    <h3 class="panel-title">
+                        <span class="panel-title-icon">🕒</span>
+                        Sensor History
+                    </h3>
+                    <button class="btn-secondary" id="load-history-btn">Load Chart</button>
+                </div>
+                <div class="history-scroll history-scroll-main" id="chart-container-wrap">
+                    <canvas id="sensor-chart"></canvas>
+                </div>
+            </section>
         </main>
 
         <!-- SIDEBAR -->
@@ -195,20 +209,6 @@
                         <span class="stat-val mono" id="uptime">00:00:00</span>
                         <span class="stat-lbl">Uptime</span>
                     </div>
-                </div>
-            </section>
-
-            <!-- HISTORY -->
-            <section class="panel history-panel">
-                <div class="panel-header">
-                    <h3 class="panel-title">
-                        <span class="panel-title-icon">🕒</span>
-                        Sensor History
-                    </h3>
-                    <button class="btn-secondary" id="load-history-btn">Load Chart</button>
-                </div>
-                <div class="history-scroll" id="chart-container-wrap">
-                    <canvas id="sensor-chart"></canvas>
                 </div>
             </section>
 
